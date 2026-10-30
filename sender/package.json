@@ -1,0 +1,13 @@
+{
+  "name": "pwa-push-sender",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "keys": "node generate-keys.js",
+    "send": "node send.js"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "web-push": "^3.6.7"
+  }
+}
