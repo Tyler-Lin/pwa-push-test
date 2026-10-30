@@ -30,7 +30,7 @@ Oct 29, 2026 · @Tyler
  ─────────────────────         ──────────────────            ──────────────
  ① 用 VAPID 公鑰訂閱 ─────────────────────────────────────▶  建立訂閱端點
  ② 取得訂閱 JSON ◀─────────────────────────────────────────  回傳 endpoint 與金鑰
- ③ 手動複製訂閱 JSON ────────▶ 存成 subscription.json
+ ③ 手動複製訂閱 JSON ────────▶ 加入 subscriptions.json
                                ④ send.js 用 VAPID 私鑰簽章 ─▶ 驗證發送者身分
  ⑤ SW 收到 push、顯示通知 ◀──────────────────────────────── 投遞推播
 ```
@@ -56,17 +56,19 @@ pwa-push-test/
 └── sender/                    # 只在本機執行
     ├── package.json
     ├── generate-keys.js       # 產生 VAPID 金鑰
-    ├── send.js                # 發送推播
+    ├── send.js                # 對所有訂閱發送推播
+    ├── add-subscription.js    # 把訂閱 JSON 加入清單
+    ├── subscriptions.js       # 讀寫訂閱清單的共用函式
     ├── .env                   # VAPID 公私鑰、聯絡信箱（加入 .gitignore）
-    ├── subscription.json      # 從 iPhone 複製來的訂閱（加入 .gitignore）
-    └── .gitignore             # 列入 .env、subscription.json、node_modules/
+    ├── subscriptions.json     # 所有裝置的訂閱清單（加入 .gitignore）
+    └── .gitignore             # 列入 .env、subscriptions.json、node_modules/
 ```
 
 | 檔案 | 能否公開 | 說明 |
 | --- | --- | --- |
 | `site/config.js` | 可以 | 只放 VAPID 公鑰 |
 | `sender/.env` | 不行 | VAPID 私鑰外洩，別人就能冒名推播給你的訂閱者 |
-| `sender/subscription.json` | 不建議 | 含裝置的推播端點與加密金鑰 |
+| `sender/subscriptions.json` | 不建議 | 含裝置的推播端點與加密金鑰 |
 
 ## 實作規格
 
@@ -141,17 +143,25 @@ VAPID_SUBJECT=mailto:you@example.com
 ### sender/send.js
 
 - 用法：`node send.js "標題" "內容" [網址]`，未給參數時用預設文字
-- 讀取 `.env`（用 `dotenv` 套件）與 `subscription.json`
+- 讀取 `.env`（用 `dotenv` 套件）與 `subscriptions.json`（訂閱物件的陣列），同時發送給所有訂閱
 - `webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)`
 - `VAPID_SUBJECT` 必須是有效的 `mailto:` 或 `https://` 網址，Apple 會拒絕格式不對的值
 - payload 為 JSON：`{ "title", "body", "url" }`；選項設 `TTL: 3600`、`urgency: "high"`
 - TTL 不要設太短：手機離線、關機或省電時推播會暫存在 Apple，超過 TTL 就被丟棄，容易誤判為程式問題
-- 成功時印出狀態碼；失敗時印出 `statusCode` 與 `body`，遇到 404 或 410 提示「訂閱已失效，請在 iPhone 重新訂閱」
+- 每個訂閱以 endpoint 尾端 8 碼當代號，逐一印出結果：成功印狀態碼；失敗印 `statusCode` 與 `body`
+- 遇到 404 或 410 視為訂閱失效，自動從 `subscriptions.json` 移除，並提示該裝置需重新訂閱
+- 最後印出總結（成功數／總數、移除數），有任何失敗時 exit code 為 1
+
+### sender/add-subscription.js
+
+- 用法：`pbpaste | npm run add`（從剪貼簿讀取），或 `npm run add -- '<訂閱 JSON>'`
+- 驗證必須有 `endpoint`、`keys.p256dh`、`keys.auth`；從手機複製時常漏掉開頭的 `{`，自動補上
+- 以 `endpoint` 去重：已存在就更新，否則新增
 
 ### sender/package.json
 
 - `"type": "module"`，相依套件：`web-push`、`dotenv`
-- scripts：`"keys": "node generate-keys.js"`、`"send": "node send.js"`
+- scripts：`"keys": "node generate-keys.js"`、`"send": "node send.js"`、`"add": "node add-subscription.js"`
 
 ## 執行步驟
 
@@ -174,7 +184,7 @@ VAPID_SUBJECT=mailto:you@example.com
    - GitHub Pages：「從分支部署」只能選根目錄或 `/docs`，無法直接指定 `site/`。改用 GitHub Actions：Settings → Pages → Source 選 GitHub Actions，workflow 用 `actions/upload-pages-artifact`（`path: site`）加 `actions/deploy-pages`。網址會是子路徑 `https://<帳號>.github.io/<repo>/`，因此所有路徑都必須是相對路徑
 5. **iPhone 安裝**：用 Safari 開部署網址 → 分享 → 加入主畫面 → 關掉 Safari，從主畫面圖示開啟。
 6. **iPhone 訂閱**：點「開啟通知」→ 允許 → 點「複製」取得訂閱 JSON。
-7. **把訂閱傳到電腦**：用 AirDrop、備忘錄同步或傳訊息給自己，存成 `sender/subscription.json`。
+7. **把訂閱傳到電腦**：用 AirDrop、備忘錄同步或傳訊息給自己，複製到 Mac 剪貼簿後在 `sender/` 執行 `pbpaste | npm run add`。每台裝置各做一次。
 8. **發送測試**：
 
    ```
@@ -202,6 +212,6 @@ VAPID_SUBJECT=mailto:you@example.com
 | 按「開啟通知」沒反應或直接 denied | `requestPermission()` 前有其他 `await`，或之前曾拒絕過 | 改為 click 內第一個動作；到 設定 → 通知 → 該 App 開啟，或刪除 App 重裝 |
 | 本機測試通知正常，遠端推播收不到 | 公鑰與私鑰不是同一組、訂閱 JSON 過期、專注模式擋下 | 確認 `config.js` 與 `.env` 公鑰一致，重新訂閱，關閉專注模式測試 |
 | `send.js` 回 403 或 BadJwtToken | `VAPID_SUBJECT` 格式不對或金鑰錯誤 | 改用 `mailto:真實信箱`，確認私鑰沒被截斷 |
-| `send.js` 回 404 或 410 | 訂閱已失效（App 被移除、重裝、權限被關） | iPhone 重新訂閱並更新 `subscription.json` |
+| `send.js` 回 404 或 410 | 訂閱已失效（App 被移除、重裝、權限被關） | `send.js` 會自動移除失效訂閱；該裝置重新訂閱後再 `npm run add` |
 | 改了程式但手機上沒更新 | Service Worker 或頁面被快取 | 完全關閉 App 再開；仍無效就從主畫面移除後重新加入 |
 | 一陣子後就收不到推播 | 推播時沒有顯示通知，被 Safari 撤銷訂閱 | 確認 `sw.js` 每個 `push` 事件都呼叫 `showNotification` |

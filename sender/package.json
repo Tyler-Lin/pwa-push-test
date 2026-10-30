@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "keys": "node generate-keys.js",
-    "send": "node send.js"
+    "send": "node send.js",
+    "add": "node add-subscription.js"
   },
   "dependencies": {
     "dotenv": "^18.0.9",
