@@ -1,0 +1,4 @@
+node_modules/
+sender/.env
+sender/subscription.json
+.DS_Store
